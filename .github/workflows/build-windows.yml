@@ -1,0 +1,90 @@
+name: build-windows-msvc
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [ main, master ]
+    tags:
+      - 'v*'   # e.g., v1.12.2-msvc
+
+jobs:
+  build-windows:
+    name: Build (Windows MSVC x64)
+    runs-on: windows-latest
+    env:
+      BUILD_TYPE: Release
+      CMAKE_GEN: Visual Studio 17 2022
+      ARCH: x64
+      # Optional: set this to ON to build static lib instead of DLL
+      BUILD_SHARED_LIBS: ON
+      MMDB_BUILD_TESTS: OFF
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # If you want to pin to the upstream tag from your fork:
+      # - name: Checkout libmaxminddb 1.12.2
+      #   run: git checkout 1.12.2
+
+      - name: Configure (CMake)
+        run: >
+          cmake -S . -B build
+          -G "${{ env.CMAKE_GEN }}" -A ${{ env.ARCH }}
+          -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+          -DBUILD_SHARED_LIBS=${{ env.BUILD_SHARED_LIBS }}
+          -DMMDB_BUILD_TESTS=${{ env.MMDB_BUILD_TESTS }}
+
+      - name: Build (CMake)
+        run: cmake --build build --config ${{ env.BUILD_TYPE }} --verbose
+
+      - name: Collect artifacts
+        shell: pwsh
+        run: |
+          New-Item -Force -ItemType Directory -Path artifacts\lib | Out-Null
+          New-Item -Force -ItemType Directory -Path artifacts\include | Out-Null
+
+          Copy-Item build\${{ env.BUILD_TYPE }}\maxminddb.dll artifacts\
+          Copy-Item build\${{ env.BUILD_TYPE }}\maxminddb.lib artifacts\lib\
+          Copy-Item -Recurse include\* artifacts\include\
+
+          # Optional: license & readme
+          if (Test-Path LICENSE) { Copy-Item LICENSE artifacts\ }
+          if (Test-Path README* ) { Copy-Item README* artifacts\ }
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: libmaxminddb-msvc-${{ env.BUILD_TYPE }}-${{ env.ARCH }}
+          path: artifacts/**
+
+  release:
+    name: Create GitHub Release (on tag)
+    needs: build-windows
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: libmaxminddb-msvc-Release-x64
+          path: artifacts
+
+      - name: Zip artifacts
+        shell: pwsh
+        run: |
+          $zipPath = "libmaxminddb-windows-msvc-x64-${{ github.ref_name }}.zip"
+          Compress-Archive -Path artifacts\* -DestinationPath $zipPath
+          echo "ZIP_PATH=$zipPath" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.ZIP_PATH }}
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
