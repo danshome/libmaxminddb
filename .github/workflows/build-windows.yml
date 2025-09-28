@@ -15,17 +15,19 @@ jobs:
       BUILD_TYPE: Release
       CMAKE_GEN: Visual Studio 17 2022
       ARCH: x64
-      # Optional: set this to ON to build static lib instead of DLL
-      BUILD_SHARED_LIBS: ON
-      MMDB_BUILD_TESTS: OFF
+      BUILD_SHARED_LIBS: ON          # set to OFF if you want static lib
+      BUILD_TESTING: OFF             # <- disable tests to avoid tap.c requirement
+      MMDB_BUILD_TESTS: OFF          # <- belt-and-suspenders for older flags
+      MAXMINDDB_BUILD_BINARIES: OFF  # <- skip mmdblookup/manpage generation
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          submodules: false
 
-      # If you want to pin to the upstream tag from your fork:
+      # If you want to pin to a specific upstream tag/branch, uncomment:
       # - name: Checkout libmaxminddb 1.12.2
       #   run: git checkout 1.12.2
 
@@ -35,7 +37,9 @@ jobs:
           -G "${{ env.CMAKE_GEN }}" -A ${{ env.ARCH }}
           -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
           -DBUILD_SHARED_LIBS=${{ env.BUILD_SHARED_LIBS }}
+          -DBUILD_TESTING=${{ env.BUILD_TESTING }}
           -DMMDB_BUILD_TESTS=${{ env.MMDB_BUILD_TESTS }}
+          -DMAXMINDDB_BUILD_BINARIES=${{ env.MAXMINDDB_BUILD_BINARIES }}
 
       - name: Build (CMake)
         run: cmake --build build --config ${{ env.BUILD_TYPE }} --verbose
@@ -46,11 +50,10 @@ jobs:
           New-Item -Force -ItemType Directory -Path artifacts\lib | Out-Null
           New-Item -Force -ItemType Directory -Path artifacts\include | Out-Null
 
-          Copy-Item build\${{ env.BUILD_TYPE }}\maxminddb.dll artifacts\
-          Copy-Item build\${{ env.BUILD_TYPE }}\maxminddb.lib artifacts\lib\
-          Copy-Item -Recurse include\* artifacts\include\
+          Copy-Item build\${{ env.BUILD_TYPE }}\maxminddb.dll artifacts\ -ErrorAction Stop
+          Copy-Item build\${{ env.BUILD_TYPE }}\maxminddb.lib artifacts\lib\ -ErrorAction Stop
+          Copy-Item -Recurse include\* artifacts\include\ -ErrorAction Stop
 
-          # Optional: license & readme
           if (Test-Path LICENSE) { Copy-Item LICENSE artifacts\ }
           if (Test-Path README* ) { Copy-Item README* artifacts\ }
 
